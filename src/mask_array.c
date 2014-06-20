@@ -8,8 +8,14 @@
 #define GREEN 2
 #define BROWN 3
 
+#define IMAGE_WIDTH  640
+#define IMAGE_HEIGHT  480
+
 #define NEW_BLOB_THRESHOLD 3
 #define MAX_BLOBS 1024
+#define MIN_BLOB_SIZE  200
+#define MAX_BLOB_SIZE  3000
+
 
 struct bgr {
     char b;
@@ -46,8 +52,8 @@ void add_to_blob(struct blob * blobs, int pixel, int color, int * numblobs){
     int added;
     i = 0;
     added = 0;
-    x = pixel % 320;
-    y = pixel / 320;
+    x = pixel % IMAGE_WIDTH;
+    y = pixel / IMAGE_WIDTH;
     while(i < *numblobs && !added)
     {
         if(blobs[i].color == color &&
@@ -88,16 +94,17 @@ void add_to_blob(struct blob * blobs, int pixel, int color, int * numblobs){
     }
 }
 
-void find_centers(struct blob * blobs, int * numblobs)
+void find_centers(struct blob * blobs, int * numblobs, uint8_t * data)
 {
     int i, j;
+    int draw_x, draw_y;
     int sum_x;
     int sum_y;
     for(i = 0; i < *numblobs; i++)
     {
         sum_x = 0;
         sum_y = 0;
-        if(blobs[i].size > 50)
+        if(blobs[i].size > MIN_BLOB_SIZE && blobs[i].size < MAX_BLOB_SIZE)
         {
             for(j = 0; j < blobs[i].size; j++)
             {
@@ -106,7 +113,18 @@ void find_centers(struct blob * blobs, int * numblobs)
             }
             blobs[i].center.x = sum_x / blobs[i].size;
             blobs[i].center.y = sum_y / blobs[i].size;
+/*
             printf("blob found... color: %i, center: (%i, %i), size: %i\n", blobs[i].color, blobs[i].center.x, blobs[i].center.y, blobs[i].size);
+*/
+            for(draw_x = blobs[i].center.x - 10; draw_x < blobs[i].center.x + 10; draw_x++) {
+                for(draw_y = blobs[i].center.y - 10; draw_y < blobs[i].center.y + 10; draw_y++){
+                    if(draw_x >= 0 && draw_y >= 0 && draw_x < 640 && draw_y < 480){
+                        data[draw_x * 3 + draw_y * 640 *3] = 50;
+                        data[draw_x * 3 + draw_y * 640 * 3 + 1] = 50;
+                        data[draw_x * 3 + draw_y * 640 * 3 + 2] = 255;
+                    }
+                }
+            }
         }
 
     }
@@ -118,7 +136,6 @@ void color_mask(uint8_t * data, int n, uint8_t * color_mask_list, int num_colors
     result = malloc(3*n);
     memset(result, 0, 3*n);
     struct blob * all_blobs;
-    printf("size of blob struct: %lu\n", sizeof(struct blob));
     all_blobs = malloc(MAX_BLOBS * sizeof(struct blob));
     int * numblobs = malloc(4);
     *numblobs = 0;
@@ -139,6 +156,6 @@ void color_mask(uint8_t * data, int n, uint8_t * color_mask_list, int num_colors
         }
     }
     memcpy(data, result, n*3);
-    find_centers(all_blobs, numblobs);
+    find_centers(all_blobs, numblobs, data);
     free(all_blobs);
 }
