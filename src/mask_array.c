@@ -33,7 +33,7 @@ struct blob {
     int xmax;
     int ymin;
     int ymax;
-    struct point3d center;
+    struct point2d center;
     int color;
     int size;
     struct point2d points[10000];
@@ -85,7 +85,30 @@ void add_to_blob(struct blob * blobs, int pixel, int color, int * numblobs){
             blobs[*numblobs].size = 1;
             *numblobs += 1;
         }
-        printf("number of blobs: %i\n", *numblobs);
+    }
+}
+
+void find_centers(struct blob * blobs, int * numblobs)
+{
+    int i, j;
+    int sum_x;
+    int sum_y;
+    for(i = 0; i < *numblobs; i++)
+    {
+        sum_x = 0;
+        sum_y = 0;
+        if(blobs[i].size > 50)
+        {
+            for(j = 0; j < blobs[i].size; j++)
+            {
+                sum_x += blobs[i].points[j].x;
+                sum_y += blobs[i].points[j].y;
+            }
+            blobs[i].center.x = sum_x / blobs[i].size;
+            blobs[i].center.y = sum_y / blobs[i].size;
+            printf("blob found... color: %i, center: (%i, %i), size: %i\n", blobs[i].color, blobs[i].center.x, blobs[i].center.y, blobs[i].size);
+        }
+
     }
 }
 
@@ -95,8 +118,8 @@ void color_mask(uint8_t * data, int n, uint8_t * color_mask_list, int num_colors
     result = malloc(3*n);
     memset(result, 0, 3*n);
     struct blob * all_blobs;
+    printf("size of blob struct: %lu\n", sizeof(struct blob));
     all_blobs = malloc(MAX_BLOBS * sizeof(struct blob));
-    /* memset(all_blobs, 0, MAX_BLOBS * sizeof(struct blob)); */
     int * numblobs = malloc(4);
     *numblobs = 0;
 
@@ -116,5 +139,6 @@ void color_mask(uint8_t * data, int n, uint8_t * color_mask_list, int num_colors
         }
     }
     memcpy(data, result, n*3);
-    printf("number of blobs found: %i\n", *numblobs);
+    find_centers(all_blobs, numblobs);
+    free(all_blobs);
 }
