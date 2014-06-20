@@ -1,0 +1,141 @@
+#!/usr/bin/env python
+import rospy
+import numpy
+import ctypes
+import sensor_msgs.point_cloud2 as pc2
+from sensor_msgs.msg import *
+from cs1567p2.msg import *
+
+_libmask_array = numpy.ctypeslib.load_library('/home/PITT/crk57/cs1567_ws/src/cs1567p2/lib/libmask_array', '.')
+
+_libmask_array.color_mask.argtypes = [ctypes.c_char_p,
+                                      ctypes.c_int32,
+                                      numpy.ctypeslib.ndpointer(dtype=numpy.uint8,
+                                                                ndim=1,
+                                                                flags='C_CONTIGUOUS'),
+                                      ctypes.c_int,
+                                      ctypes.c_int]
+#_libmask_array.color_mask.restype  = numpy.ctypeslib.ndpointer(dtype=numpy.uint8,
+                                                               #ndim=1,
+                                                               #shape=None,
+                                                               #flags='C_CONTIGUOUS')
+_libmask_array.color_mask.restype  = ctypes.c_char_p
+
+class Rectangle():
+    def __init__(self):
+        self.xmin = 0
+        self.xmax = 0
+        self.ymin = 0
+        self.ymax = 0
+        self.color = []
+
+    def get_center(self):
+        pass
+
+
+                      # blue          red            green         brown           black
+#color_mask_list = [[240,200,170], [195,185,240], [240,250,240], [180,204,235], [150,140,135]]
+color_mask_list = numpy.array([240,2000,180, 180,155,240, 240,250,240, 180,204,235], dtype=numpy.uint8, order='C')
+blobs = [[],[],[],[],[]]
+threshold = 20
+locpub = None
+kinect1pub = None
+kinect2pub = None
+top_mask = Image()
+mid_mask = Image()
+mid_count = 0
+top_count = 0
+
+def top_image_callback(message):
+    global color_mask_list
+    global top_mask
+    global top_count
+    global threshold
+    global kinect1pub
+    #make a new image if you want to view your mask
+    top_mask = Image()
+    top_mask.height = message.height
+    top_mask.width = message.width
+    top_mask.encoding = message.encoding
+    top_mask.is_bigendian = message.is_bigendian
+    top_mask.step = message.step
+    if message.encoding == "bgr8": #this is image_color encoding
+        #byte_array = message.data
+        _libmask_array.color_mask(message.data, top_mask.width * top_mask.height, color_mask_list, 4, threshold)
+    top_mask.data = message.data
+    kinect1pub.publish(top_mask) #publish the mask for viewing
+
+
+    
+def mid_image_callback(message):
+    global color_mask_list
+    global mid_mask
+    global mid_count
+    global threshold
+    global kinect2pub
+    #get_middle_pixels(message)
+    mid_mask = Image()
+    mid_mask.height = message.height
+    mid_mask.width = message.width
+    mid_mask.encoding = message.encoding
+    mid_mask.is_bigendian = message.is_bigendian
+    mid_mask.step = message.step
+    if message.encoding == "bgr8":
+        #byte_array = message.data
+        _libmask_array.color_mask(message.data, top_mask.width * top_mask.height, color_mask_list, 4, threshold)    
+    mid_mask.data = message.data
+    kinect2pub.publish(mid_mask)
+
+
+def top_cloud_callback(message):
+    try:
+        #make a generator, skipping points that have no depth, on points in 
+        # list of uvs (index into image [col,row]) or if empty list, get all pt
+        data_out = pc2.read_points(message, field_names=None, skip_nans=True, uvs=[]) 
+        i=0
+        iteration1 = next(data_out) #format x,y,z,rgba
+        while iteration1 != None:
+            iteration1 = next(data_out)
+            i=i+1
+    except StopIteration: 
+        print "1 complete"
+
+def mid_cloud_callback(message):
+    try:
+        data_out = pc2.read_points(message, field_names=None, skip_nans=True, uvs=[])
+        i=0
+        iteration1 = next(data_out) #format x,y,z,rgba
+        while iteration1 != None:
+            iteration1 = next(data_out)
+            i=i+1
+    except StopIteration: 
+        print "2 complete"
+
+def get_middle_pixels(orig_image):
+    pixels_array = list(orig_image.data)
+    height = orig_image.height
+    width = orig_image.width
+    step = orig_image.step
+    
+    index = step * height / 2
+    index += step / 2
+    index -= index % 3
+    print "color = ", ord(pixels_array[index]), ", ", ord(pixels_array[index+1]), ", ", ord(pixels_array[index+2])
+
+def initialize():
+    global kinect1pub
+    global kinect2pub
+    global locpub
+    rospy.init_node("localize")
+    locpub = rospy.Publisher("/gort/location",LocationList) #publish your locations
+    kinect1pub = rospy.Publisher("/gort/mask1",Image) #test your mask
+    kinect2pub = rospy.Publisher("/gort/mask2",Image)
+    rospy.Subscriber("/kinect3/rgb/image_color", Image, top_image_callback)
+    rospy.Subscriber("/kinect3/depth_registered/points", PointCloud2, top_cloud_callback)
+    rospy.Subscriber("/kinect2/rgb/image_color", Image, mid_image_callback)
+    rospy.Subscriber("/kinect2/depth_registered/points", PointCloud2, mid_cloud_callback)
+    rospy.spin()
+
+if __name__ == "__main__":
+    initialize()
+
