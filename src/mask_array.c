@@ -2,20 +2,25 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #define BLUE 0
-#define RED  1
-#define GREEN 2
-#define BROWN 3
+#define GREEN 1
+#define BROWN 2
+#define BLACK 3
+#define RED  4
 
 #define IMAGE_WIDTH  640
 #define IMAGE_HEIGHT  480
+
+#define MAX_BLOB_DISTANCE 40
 
 #define NEW_BLOB_THRESHOLD 3
 #define MAX_BLOBS 1024
 #define MIN_BLOB_SIZE  200
 #define MAX_BLOB_SIZE  3000
 
+int * output;
 
 struct bgr {
     char b;
@@ -43,6 +48,13 @@ struct blob {
     int color;
     int size;
     struct point2d points[10000];
+};
+
+struct return_struct {
+    int color;
+    int x;
+    int y;
+    int size;
 };
 
 void add_to_blob(struct blob * blobs, int pixel, int color, int * numblobs){
@@ -94,43 +106,67 @@ void add_to_blob(struct blob * blobs, int pixel, int color, int * numblobs){
     }
 }
 
-void find_centers(struct blob * blobs, int * numblobs, uint8_t * data)
+void find_centers(struct blob * blobs, int * output, int * numblobs, uint8_t * data)
 {
-    int i, j;
+    int i, j, k;
     int draw_x, draw_y;
     int sum_x;
     int sum_y;
+    int relevant;
+    relevant = 0;
+    int pixel_distance;
+
     for(i = 0; i < *numblobs; i++)
     {
         sum_x = 0;
         sum_y = 0;
         if(blobs[i].size > MIN_BLOB_SIZE && blobs[i].size < MAX_BLOB_SIZE)
         {
-            for(j = 0; j < blobs[i].size; j++)
+            if (blobs[i].color == RED)
             {
-                sum_x += blobs[i].points[j].x;
-                sum_y += blobs[i].points[j].y;
-            }
-            blobs[i].center.x = sum_x / blobs[i].size;
-            blobs[i].center.y = sum_y / blobs[i].size;
-/*
-            printf("blob found... color: %i, center: (%i, %i), size: %i\n", blobs[i].color, blobs[i].center.x, blobs[i].center.y, blobs[i].size);
-*/
-            for(draw_x = blobs[i].center.x - 10; draw_x < blobs[i].center.x + 10; draw_x++) {
-                for(draw_y = blobs[i].center.y - 10; draw_y < blobs[i].center.y + 10; draw_y++){
-                    if(draw_x >= 0 && draw_y >= 0 && draw_x < 640 && draw_y < 480){
-                        data[draw_x * 3 + draw_y * 640 *3] = 50;
-                        data[draw_x * 3 + draw_y * 640 * 3 + 1] = 50;
-                        data[draw_x * 3 + draw_y * 640 * 3 + 2] = 255;
+
+                for(j = 0; j < blobs[i].size; j++)
+                {
+                    sum_x += blobs[i].points[j].x;
+                    sum_y += blobs[i].points[j].y;
+                }
+                blobs[i].center.x = sum_x / blobs[i].size;
+                blobs[i].center.y = sum_y / blobs[i].size;
+                sum_x = 0;
+                sum_y = 0;
+                output[relevant * 3] = blobs[i].center.x;
+                output[relevant * 3 + 1] = blobs[i].center.y;
+                output[relevant * 3 + 2] = blobs[i].color;
+                relevant++;
+                for(k = 0; k < *numblobs; k++)
+                {
+                    if(blobs[k].color != RED && blobs[k].size > MIN_BLOB_SIZE && blobs[i].size < MAX_BLOB_SIZE)
+                    {
+                        for(j = 0; j < blobs[k].size; j++)
+                        {
+                            sum_x += blobs[k].points[j].x;
+                            sum_y += blobs[k].points[j].y;
+                        }
+                        blobs[k].center.x = sum_x / blobs[k].size;
+                        blobs[k].center.y = sum_y / blobs[k].size;
+                        sum_x = 0;
+                        sum_y = 0;
+                        pixel_distance = sqrt((blobs[i].center.x - blobs[k].center.x) * (blobs[i].center.x - blobs[k].center.x) + (blobs[i].center.y - blobs[k].center.y) * (blobs[i].center.y - blobs[k].center.y));
+                        if(pixel_distance < MAX_BLOB_DISTANCE)
+                        {
+                            output[relevant * 3] = blobs[k].center.x;
+                            output[relevant * 3 + 1] = blobs[k].center.y;
+                            output[relevant * 3 + 2] = blobs[k].color;
+                            relevant++;
+                        }
                     }
                 }
             }
         }
-
     }
 }
 
-void color_mask(uint8_t * data, int n, uint8_t * color_mask_list, int num_colors, int thresh){
+void color_mask(uint8_t * data, int n, uint8_t * color_mask_list, int num_colors, int thresh, int * output, int output_size){
     int pixel, color;
     uint8_t * result;
     result = malloc(3*n);
@@ -156,6 +192,7 @@ void color_mask(uint8_t * data, int n, uint8_t * color_mask_list, int num_colors
         }
     }
     memcpy(data, result, n*3);
-    find_centers(all_blobs, numblobs, data);
+    find_centers(all_blobs, output, numblobs, data);
+    free(result);
     free(all_blobs);
 }
