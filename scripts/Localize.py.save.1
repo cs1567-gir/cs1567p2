@@ -1,0 +1,238 @@
+#!/usr/bin/env python
+import math
+import rospy
+import numpy
+import ctypes
+import sensor_msgs.point_cloud2 as pc2
+from sensor_msgs.msg import *
+from cs1567p2.msg import *
+
+class RobotLocation():
+    def __init__(self, n):
+        self.screen = 'top'
+        self.pix_x = 0
+        self.pix_y = 0
+        self.face_x = 0
+        self.face_y = 0
+        self.x = 0.0
+        self.y = 0.0
+        self.z = 0.0
+        self.color = n
+        self.heading = 'not localized'
+        self.location = Location()
+        location.robot_num = n
+
+    def set_x(self, _x):
+        self.x
+
+BLUE = 0
+GREEN = 1
+BROWN = 2
+BLACK = 3
+RED = 4
+
+INVERT_X = 1
+INVERT_Y = -1
+TOP_REAL_OFFSET = (0.157, 0.8692)
+MID_REAL_OFFSET = (0.2147, -1.156)
+
+MID_ORIGIN_OFFSET = (363, 20)
+TOP_ORIGIN_OFFSET = (353, 425)
+
+_libmask_array = numpy.ctypeslib.load_library('/home/PITT/crk57/cs1567_ws/src/cs1567p2/lib/libmask_array', '.')
+
+_libmask_array.color_mask.argtypes = [ctypes.c_char_p,
+                                      ctypes.c_int32,
+                                      numpy.ctypeslib.ndpointer(dtype=numpy.uint8,
+                                                                ndim=1,
+                                                                flags='C_CONTIGUOUS'),
+                                      ctypes.c_int,
+                                      ctypes.c_int,
+                                      numpy.ctypeslib.ndpointer(dtype=numpy.int32, ndim=1, flags='C_CONTIGUOUS'),
+                                      ctypes.c_int]
+_libmask_array.color_mask.restype  = ctypes.c_char_p
+
+
+#139 ,  174 ,  136
+                      # blue            green         brown           black        red
+#color_mask_list = [[240,200,170], [240,250,240], [180,204,235], [172,163,150], [195,185,240]]
+color_mask_list = numpy.array([240,200,170,  115,160,105, 192,227,245, 175,163,150, 182,160,242], dtype=numpy.uint8, order='C')
+color_mask_list_top = numpy.array([245,200,175, 139,174,136, 192,227,245, 175,163,150, 182,170,233], dtype=numpy.uint8, order='C')
+robots = []
+top_buffer = []
+mid_buffer = []
+threshold = 20
+locpub = None
+kinect1pub = None
+kinect2pub = None
+top_mask = Image()
+mid_mask = Image()
+mid_count = 0
+top_count = 0
+top_xys = []
+mid_xys = []
+
+def top_image_callback(message):
+    global color_mask_list_top
+    global top_mask
+    global top_count
+    global threshold
+    global kinect1pub
+    #make a new image if you want to view your mask
+    top_mask = Image()
+    top_mask.height = message.height
+    top_mask.width = message.width
+    top_mask.encoding = message.encoding
+    top_mask.is_bigendian = message.is_bigendian
+    top_mask.step = message.step
+    #get_middle_pixels(message)
+    if message.encoding == "bgr8": #this is image_color encoding
+        #byte_array = message.data
+        _libmask_array.color_mask(message.data, top_mask.width * top_mask.height, color_mask_list_top, 5, threshold, top_buffer, 60)
+    top_mask.data = message.data
+    kinect1pub.publish(top_mask) #publish the mask for viewing
+
+
+def mid_image_callback(message):
+    global color_mask_list
+    global mid_mask
+    global mid_count
+    global threshold
+    global kinect2pub
+    #get_middle_pixels(message)
+    mid_mask = Image()
+    mid_mask.height = message.height
+    mid_mask.width = message.width
+    mid_mask.encoding = message.encoding
+    mid_mask.is_bigendian = message.is_bigendian
+    mid_mask.step = message.step
+    if message.encoding == "bgr8":
+        #byte_array = message.data
+        _libmask_array.color_mask(message.data, top_mask.width * top_mask.height, color_mask_list, 5, threshold, mid_buffer, 60)    
+    mid_mask.data = message.data
+    kinect2pub.publish(mid_mask)
+
+def print_robots():
+    global robots
+    global locpub
+    loc_list = []
+    for x in range(4):
+        if(robots[x].heading != 'not localized' or robots[x].heading != 'invalid')
+            loc_list.append(robots[x].location)
+            print 'Robot ', x, ': x: ', robots[x].x, ' y: ', robots[x].y, ' z: ', robots[x].z, ' heading: ', robots[x].heading 
+    locpub.publish(loc_list)
+
+
+def update_robots(locations, blobs, offset):
+    global robots
+    for i in range(len(locations) / 2):
+        distance = math.sqrt((locations[2*i][0] - locations[2*i + 1][0])**2 + (locations[2*i][1] - locations[2*i + 1][1])**2)
+        robots[blobs[6*i + 5]].set_x(locations[2*i + 1][0] - offset[0])
+        #robots[blobs[6*i + 5]].x = locations[2*i + 1][0] - offset[0]
+        robots[blobs[6*i + 5]].set_y(INVERT_Y * (locations[2*i + 1][1] - offset[1]))
+        #robots[blobs[6*i + 5]].y = INVERT_Y * (locations[2*i + 1][1] - offset[1])
+        if(distance != 0):
+            robots[blobs[6*i + 5]].set_heading(math.degrees(math.asin(((INVERT_Y*locations[2*i][1]) - (INVERT_Y*locations[2*i + 1][1]))/distance)))
+            #robots[blobs[6*i + 5]].heading = math.degrees(math.asin(((INVERT_Y*locations[2*i][1]) - (INVERT_Y*locations[2*i + 1][1]))/distance))
+        else:
+            robots[blobs[6*i + 5]].heading = 'invalid'
+        i += 1 
+    print_robots()
+    print '----------------------------------------------------------------------------------------------\n'        
+
+def top_cloud_callback(message):
+    real_locations = []
+    try:
+        #make a generator, skipping points that have no depth, on points in 
+        # list of uvs (index into image [col,row]) or if empty list, get all pt
+        blobs = top_buffer.tolist()
+        print blobs
+        points = [TOP_ORIGIN_OFFSET]
+        x = 0
+        while(blobs[6*x] != 0 and blobs[6*x + 3] != 0):
+            points.append((blobs[x*6 + 0], blobs[x*6 + 1]))
+            points.append((blobs[x*6 + 3], blobs[x*6 + 4]))
+            x += 1
+        print points
+        data_out = pc2.read_points(message, field_names=None, skip_nans=True, uvs=points) 
+        i=0
+        iteration1 = next(data_out) #format x,y,z,rgba
+        print iteration1
+        while iteration1 != None:
+            iteration1 = next(data_out)
+            print 'top: ', iteration1
+            real_locations.append(iteration1)
+            i=i+1
+    except StopIteration: 
+        if len(real_locations) != 0:
+            update_robots(real_locations, blobs, TOP_REAL_OFFSET)
+        print "1 complete"
+
+def mid_cloud_callback(message):
+    real_locations = []
+    try:
+        blobs = mid_buffer.tolist()
+        print blobs
+        points = [MID_ORIGIN_OFFSET]
+        x = 0
+        while(blobs[6*x] != 0 and blobs[6*x + 3] != 0):
+            points.append((blobs[x*6 + 0], blobs[x*6 + 1]))
+            points.append((blobs[x*6 + 3], blobs[x*6 + 4]))
+            x += 1
+        print points
+        data_out = pc2.read_points(message, field_names=None, skip_nans=False, uvs=points)
+        i=0
+        iteration1 = next(data_out) #format x,y,z,rgba
+        print iteration1
+        while iteration1 != None:
+            iteration1 = next(data_out)
+            print 'mid: ', iteration1
+            real_locations.append(iteration1)
+            i=i+1
+    except StopIteration:
+        if len(real_locations) != 0:
+            update_robots(real_locations, blobs, MID_REAL_OFFSET) 
+        print "2 complete"
+
+def get_middle_pixels(orig_image):
+    pixels_array = list(orig_image.data)
+    height = orig_image.height
+    width = orig_image.width
+    step = orig_image.step
+
+    x = 370
+    y = 267
+
+
+    index =640 * 3 * y + x*3
+    print "color = ", ord(pixels_array[index]), ", ", ord(pixels_array[index+1]), ", ", ord(pixels_array[index+2])
+
+def initialize():
+    global kinect1pub
+    global kinect2pub
+    global locpub
+    global top_buffer
+    global mid_buffer
+    global robots
+
+    for x in range(5):
+        robots.append(RobotLocation(x))
+
+    for x in range(60):
+        top_buffer.append(0)
+        mid_buffer.append(0)
+    top_buffer = numpy.array(top_buffer, dtype=numpy.int32, order='C')
+    mid_buffer = numpy.array(mid_buffer, dtype=numpy.int32, order='C')
+    rospy.init_node("localize")
+    locpub = rospy.Publisher("/gort/location",LocationList) #publish your locations
+    kinect1pub = rospy.Publisher("/gort/mask1",Image) #test your mask
+    kinect2pub = rospy.Publisher("/gort/mask2",Image)
+    rospy.Subscriber("/kinect3/rgb/image_color", Image, top_image_callback)
+    rospy.Subscriber("/kinect3/depth_registered/points", PointCloud2, top_cloud_callback)
+    rospy.Subscriber("/kinect2/rgb/image_color", Image, mid_image_callback)
+    rospy.Subscriber("/kinect2/depth_registered/points", PointCloud2, mid_cloud_callback)
+    rospy.spin()
+
+if __name__ == "__main__":
+    initialize()
+

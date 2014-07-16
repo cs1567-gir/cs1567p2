@@ -31,10 +31,7 @@ robots = None
 lower_blue = numpy.array([100,40,200])
 upper_blue = numpy.array([120,130,255])
 
-#lower_orange = numpy.array([20, int(0.4*255), int(.8*255)])
-#upper_orange = numpy.array([50, int(1.00*255), int(1.0*255)])
-
-lower_orange = numpy.array([10, int(0.1*255), int(.8*255)])
+lower_orange = numpy.array([10, int(0.15*255), int(.6*255)])
 upper_orange = numpy.array([80, int(1.00*255), int(1.0*255)])
 
 lower_purple = numpy.array([115, int(0.15*255), int(0.5*255)])
@@ -54,12 +51,6 @@ MAX_BLOB_SIZE = 500
 MAX_BLOB_DISTANCE = 60
 
 NUM_ROBOTS = len(color_mask_list) - 1
-
-TOP_REAL_OFFSET = (0.157, 0.8692)
-MID_REAL_OFFSET = (0.2147, -1.156)
-
-ORIGIN_OFFSETS = [TOP_REAL_OFFSET, MID_REAL_OFFSET]
-INVERT_Y = -1
 
 def top_image_callback(message):
     global color_mask_list
@@ -102,7 +93,8 @@ def mid_image_callback(message):
     bridge = cv_bridge.CvBridge()	# CvBridge
     cv_image = bridge.imgmsg_to_cv2(message, "bgr8")
     hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)  # convert to HSV colorspace
-    for color in color_mask_list:			# for each color, generate a mask
+    masks.append(cv2.inRange(hsv, lower_orange, upper_orange))
+    '''for color in color_mask_list:			# for each color, generate a mask
         masks.append(cv2.inRange(hsv, color[0], color[1]))
     multi_mask = masks[0]				# create a multiple-color mask for viewing if necessary
     for x in range(len(masks)):					# populate the multi-color mask
@@ -117,11 +109,20 @@ def mid_image_callback(message):
                 cy = int(M['m01']/M['m00'])
                 mid_blobs_by_color[x].append((cx, cy))
                 #print color_string_list[x], " blob at x: ", cx, ' y: ', cy
+    '''
+    multi_mask = masks[0]
+    contours,hierarchy = cv2.findContours(multi_mask, cv2.RETR_LIST,cv2.CHAIN_APPROX_SIMPLE)
+    for cnt in contours:
+        M = cv2.moments(cnt)
+        area = cv2.contourArea(cnt)
+        if area > MIN_BLOB_SIZE and area < MAX_BLOB_SIZE: 
+                cx = int(M['m10']/M['m00'])
+                cy = int(M['m01']/M['m00'])
+                #print 'blob at: ', cx, ', ', cy
     res = cv2.bitwise_and(cv_image,cv_image, mask= multi_mask)
     mid_mask = bridge.cv2_to_imgmsg(res, "bgr8")    
-    #kinect2pub.publish(mid_mask)
-    update_robots(1)
-    #print "done2"
+    kinect2pub.publish(mid_mask)
+    #print "--------------------------------------------done2-----------------------------"
 
 def get_distance(base_x, base_y, point_x, point_y):
     distance = math.sqrt((point_x - base_x)**2 + (point_y - base_y)**2)
@@ -132,11 +133,26 @@ def get_heading(base_x, base_y, point_x, point_y):
     theta = 0.0
     if distance != 0:
         theta = math.degrees(math.asin((point_y - base_y)/distance))
-        if point_x < base_x:
+        if point_x <= base_x:
             theta = math.degrees(math.acos((point_x - base_x)/distance))
             if point_y < base_y:
-                theta = 360.0 - theta
+                theta += 90.0
     return theta
+
+def update_robots(real_points, pair_colors):
+    global robots
+    global locpub
+    locations = []
+    for i in range(len(pair_colors)):
+        x = real_points[2*i][0]
+        y = real_points[2*i][1]
+        point_x = real_points[2*i + 1][0]
+        point_y = real_points[2*i + 1][1]
+        theta = get_heading(x, y, point_x, point_y)
+        robots[pair_colors[i]].set_location(x, y, theta)
+        robots[pair_colors[i]].valid = True
+        locations.append(robots[pair_colors[i]].location)
+    locpub.publish(locations)
 
 def pixels_to_real_offset(x, y):
     x_pixel_offset = x - 320.0
@@ -144,38 +160,6 @@ def pixels_to_real_offset(x, y):
     y_pixel_offset = y - 240
     real_y = 0.004981428 * y_pixel_offset + 0.0040695362
     return (real_x, real_y)
-
-def update_robots(camera):
-    global robots
-    global locpub
-    locations = []
-    points_of_interest = []
-    real_points = []
-    pair_colors = []
-    n = len(mid_blobs_by_color)
-    for red_blob in mid_blobs_by_color[n-1]:
-        for i in range(n-1):
-            for base_blob in mid_blobs_by_color[i]:
-                distance = get_distance(base_blob[0], base_blob[1], red_blob[0], red_blob[1])      
-                if distance < MAX_BLOB_DISTANCE:
-                    #print "FOUND PAIR: ", color_string_list[i]
-                    x, y = pixels_to_real_offset(base_blob[0], base_blob[1])
-                    point_x, point_y = pixels_to_real_offset(red_blob[0], red_blob[1])
-                    #print "before origin offsets: ", x, y, point_x, point_y
-                    x -= ORIGIN_OFFSETS[camera][0]
-                    point_x -= ORIGIN_OFFSETS[camera][0]
-                    y -= ORIGIN_OFFSETS[camera][1]
-                    y *= INVERT_Y
-                    #print "Y offset: ", ORIGIN_OFFSETS[camera][1]
-                    point_y -= ORIGIN_OFFSETS[camera][1]
-                    point_y *= INVERT_Y
-                    theta = get_heading(x, y, point_x, point_y)
-                    #print "(", x, ",", y, ") (", point_x, ",", point_y, ") ", theta
-                    robots[i].set_location(x, y, theta)                    
-                    robots[i].valid = True
-    for robot in robots:
-        locations.append(robot.location)
-    locpub.publish(locations)
 
 def top_cloud_callback(message):
     try:
@@ -191,35 +175,34 @@ def top_cloud_callback(message):
         print "1 complete"
 
 def mid_cloud_callback(message):
-    '''
-    points_of_interest = []
-    real_points = []
-    pair_colors = []
-    n = len(mid_blobs_by_color)
-    print "CHECKING TOP BLOBS"
-    for red_blob in mid_blobs_by_color[n-1]:
-        for i in range(n-1):
-            for base_blob in mid_blobs_by_color[i]:
-                distance = get_distance(base_blob[0], base_blob[1], red_blob[0], red_blob[1])      
-                if distance < MAX_BLOB_DISTANCE:
-                    print "FOUND PAIR: ", color_string_list[i]
-                    points_of_interest.append(base_blob)
-                    points_of_interest.append(red_blob)
-                    pair_colors.append(i)
+    points_of_interest = [(624,418), (523,220), (330,212), (427,207), (111,202), (206,204), (328,145), (325,84), (615,11)]
+    #real_points = []
+    #pair_colors = []
+    #n = len(mid_blobs_by_color)
+    #print "CHECKING TOP BLOBS"
+    #for red_blob in mid_blobs_by_color[n-1]:
+    #    for i in range(n-1):
+    #        for base_blob in mid_blobs_by_color[i]:
+    #            distance = get_distance(base_blob[0], base_blob[1], red_blob[0], red_blob[1])      
+    #            if distance < MAX_BLOB_DISTANCE:
+    #                print "FOUND PAIR: ", color_string_list[i]
+    #                points_of_interest.append(base_blob)
+    #                points_of_interest.append(red_blob)
+    #                pair_colors.append(i)
     try:
-        data_out = pc2.read_points(message, field_names=None, skip_nans=True, uvs=points_of_interest)
+        data_out = pc2.read_points(message, field_names=None, skip_nans=False, uvs=points_of_interest)
         i=0
         iteration1 = next(data_out) #format x,y,z,rgba
         while iteration1 != None:
-            real_points.append(iteration1)
-            print "POINT: ", iteration1
+            #real_points.append(iteration1)
+            print points_of_interest[i], ' = ', iteration1
+            guess = pixels_to_real_offset(points_of_interest[i][0], points_of_interest[i][1])
+            print '\tmy scaled point: ', guess
             iteration1 = next(data_out)
             i=i+1
     except StopIteration: 
-        update_robots(real_points, pair_colors)
+        #update_robots(real_points, pair_colors)
         print "2 complete"
-    '''
-    pass
 
 def initialize():
     global kinect1pub

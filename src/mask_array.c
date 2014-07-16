@@ -10,6 +10,8 @@
 #define BLACK 3
 #define RED  4
 
+#define BLOB_BUFFER_SIZE 5000
+
 #define IMAGE_WIDTH  640
 #define IMAGE_HEIGHT  480
 
@@ -47,7 +49,7 @@ struct blob {
     struct point2d center;
     int color;
     int size;
-    struct point2d points[10000];
+    struct point2d points[BLOB_BUFFER_SIZE];
 };
 
 struct return_struct {
@@ -72,20 +74,23 @@ void add_to_blob(struct blob * blobs, int pixel, int color, int * numblobs){
            (blobs[i].xmin - x < NEW_BLOB_THRESHOLD && x - blobs[i].xmax < NEW_BLOB_THRESHOLD) &&
            (blobs[i].ymin - y < NEW_BLOB_THRESHOLD && y - blobs[i].ymax < NEW_BLOB_THRESHOLD))
            {
-               /* add to existing blob */
-               blobs[i].points[blobs[i].size].x = x;
-               blobs[i].points[blobs[i].size].y = y;
-               /* set added to true */
+               if (blobs[i].size < BLOB_BUFFER_SIZE)
+               {
+                   /* add to existing blob */
+                   blobs[i].points[blobs[i].size].x = x;
+                   blobs[i].points[blobs[i].size].y = y;
+                   /* set added to true */
+                   if(x < blobs[i].xmin)
+                       blobs[i].xmin = x;
+                   if(x > blobs[i].xmax)
+                       blobs[i].xmax = x;
+                   if(y < blobs[i].ymin)
+                       blobs[i].ymin = y;
+                   if(y > blobs[i].ymax)
+                       blobs[i].ymax = y;
+                   blobs[i].size++;
+               }
                added = 1;
-               if(x < blobs[i].xmin)
-                   blobs[i].xmin = x;
-               if(x > blobs[i].xmax)
-                   blobs[i].xmax = x;
-               if(y < blobs[i].ymin)
-                   blobs[i].ymin = y;
-               if(y > blobs[i].ymax)
-                   blobs[i].ymax = y;
-               blobs[i].size++;
            }
            i++;
     }
@@ -115,6 +120,7 @@ void find_centers(struct blob * blobs, int * output, int * numblobs, uint8_t * d
     int relevant;
     relevant = 0;
     int pixel_distance;
+    int paired = 0;
 
     for(i = 0; i < *numblobs; i++)
     {
@@ -124,7 +130,7 @@ void find_centers(struct blob * blobs, int * output, int * numblobs, uint8_t * d
         {
             if (blobs[i].color == RED)
             {
-
+                paired = 0;
                 for(j = 0; j < blobs[i].size; j++)
                 {
                     sum_x += blobs[i].points[j].x;
@@ -158,8 +164,12 @@ void find_centers(struct blob * blobs, int * output, int * numblobs, uint8_t * d
                             output[relevant * 3 + 1] = blobs[k].center.y;
                             output[relevant * 3 + 2] = blobs[k].color;
                             relevant++;
+                            paired = 1;
                         }
                     }
+                }
+                if(paired == 0){
+                    relevant--;		/* overwrite the last red, since it didnt have a paired blob */
                 }
             }
         }
