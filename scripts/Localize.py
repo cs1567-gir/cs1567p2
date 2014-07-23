@@ -19,8 +19,7 @@ class RobotLocation():
         self.location.y = y
         self.location.theta = theta
 
-color_mask_list = [[110,0,0]]
-threshold = 20
+
 locpub = None
 kinect1pub = None
 kinect2pub = None
@@ -88,6 +87,9 @@ def k1_image_callback(message):
     cv_image = bridge.imgmsg_to_cv2(message, "bgr8")
     hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)  # convert to HSV colorspace
     for color in color_mask_list:			# for each color, generate a mask
+        mask = cv2.inRange(hsv, color[0], color[1])
+        cv2.erode(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5,5)))
+        cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5,5)))
         masks.append(cv2.inRange(hsv, color[0], color[1]))
     multi_mask = masks[0]				# create a multiple-color mask for viewing if necessary
     for x in range(len(masks)):					# populate the multi-color mask
@@ -106,7 +108,7 @@ def k1_image_callback(message):
     k1_mask = bridge.cv2_to_imgmsg(res, "bgr8")    
     kinect1pub.publish(k1_mask) #publish the mask for viewing
     update_robots(KINECT1)
-    print "done3"
+    print "done1"
         
 def k2_image_callback(message):
     global color_mask_list
@@ -137,7 +139,7 @@ def k2_image_callback(message):
     k2_mask = bridge.cv2_to_imgmsg(res, "bgr8")    
     kinect2pub.publish(k2_mask)
     update_robots(KINECT2)
-    #print "done2"
+    print "done2"
 
 def k3_image_callback(message):
     global color_mask_list
@@ -168,7 +170,7 @@ def k3_image_callback(message):
     k3_mask = bridge.cv2_to_imgmsg(res, "bgr8")    
     kinect3pub.publish(k3_mask)
     update_robots(KINECT3)
-    #print "done2"
+    print "done3"
 
 ################## UTILITY FUNCTIONS ####################################
 
