@@ -21,12 +21,8 @@ class RobotLocation():
 
 
 locpub = None
-kinect1pub = None
-kinect2pub = None
-kinect3pub = None
-k1_mask = Image()
-k2_mask = Image()
-k3_mask = Image()
+pubs = []
+kinect_masks = [Image(), Image(), Image()]
 robots = None
 
 
@@ -38,14 +34,14 @@ upper_blue = numpy.array([120,130,255])
 #lower_orange = numpy.array([20, int(0.4*255), int(.8*255)])
 #upper_orange = numpy.array([50, int(1.00*255), int(1.0*255)])
 
-lower_orange = numpy.array([10, int(0.1*255), int(.8*255)])
-upper_orange = numpy.array([80, int(1.00*255), int(1.0*255)])
+lower_orange = numpy.array([15, int(0.06*255), int(.8*255)])
+upper_orange = numpy.array([28, int(0.88*255), int(1.0*255)])
 
-lower_purple = numpy.array([115, int(0.15*255), int(0.5*255)])
+lower_purple = numpy.array([115, int(0.2*255), int(0.6*255)])
 upper_purple = numpy.array([135, int(0.9*255), int(1.0*255)])
 
-lower_red = numpy.array([160, int(0.2*255), int(0.85*255)])
-upper_red = numpy.array([180, int(0.5*255), int(1.0*255)])
+lower_red = numpy.array([150, int(0.15*255), int(0.80*255)])
+upper_red = numpy.array([180, int(0.6*255), int(1.0*255)])
 
 color_mask_list = [[lower_blue, upper_blue],[lower_orange, upper_orange], [lower_purple, upper_purple], [lower_red, upper_red]]
 blobs_by_color = [ [[],[],[],[]],
@@ -63,7 +59,7 @@ KINECT3 = 2
 
 MIN_BLOB_SIZE = 250
 MAX_BLOB_SIZE = 500
-MAX_BLOB_DISTANCE = 60
+MAX_BLOB_DISTANCE = 40
 
 NUM_ROBOTS = len(color_mask_list) - 1
 
@@ -74,13 +70,13 @@ K3_REAL_OFFSET = (0.157, 0.8692)
 ORIGIN_OFFSETS = [K1_REAL_OFFSET, K2_REAL_OFFSET, K3_REAL_OFFSET]
 INVERT_Y = -1
 
-########  CALLBACKS  ###########################################
+########  CALLBACKS  ##########################################
 
-def k1_image_callback(message):
+def mask_image_and_update(message, camera):
     global color_mask_list
-    global k1_mask
+    global kinect_masks
     global threshold
-    global kinect1pub
+    global pubs
     global blobs_by_color
     masks = [] # list of our binary masked images by color (from color list)
     bridge = cv_bridge.CvBridge()	# CvBridge
@@ -88,12 +84,12 @@ def k1_image_callback(message):
     hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)  # convert to HSV colorspace
     for color in color_mask_list:			# for each color, generate a mask
         mask = cv2.inRange(hsv, color[0], color[1])
-        cv2.erode(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5,5)))
-        cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5,5)))
-        masks.append(cv2.inRange(hsv, color[0], color[1]))
+        mask = cv2.erode(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2,2)))
+        mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2,2)))
+        masks.append(mask)
     multi_mask = masks[0]				# create a multiple-color mask for viewing if necessary
     for x in range(len(masks)):					# populate the multi-color mask
-        blobs_by_color[KINECT1][x] = []
+        blobs_by_color[camera][x] = []
         multi_mask = cv2.bitwise_or(multi_mask, masks[x])
         contours,hierarchy = cv2.findContours(masks[x],cv2.RETR_LIST,cv2.CHAIN_APPROX_SIMPLE)
         for cnt in contours:
@@ -102,75 +98,25 @@ def k1_image_callback(message):
             if area > MIN_BLOB_SIZE and area < MAX_BLOB_SIZE: 
                 cx = int(M['m10']/M['m00'])
                 cy = int(M['m01']/M['m00'])
-                blobs_by_color[KINECT1][x].append((cx, cy))
+                blobs_by_color[camera][x].append((cx, cy))
                 #print color_string_list[x], " blob at x: ", cx, ' y: ', cy
     res = cv2.bitwise_and(cv_image,cv_image, mask= multi_mask)
-    k1_mask = bridge.cv2_to_imgmsg(res, "bgr8")    
-    kinect1pub.publish(k1_mask) #publish the mask for viewing
-    update_robots(KINECT1)
-    print "done1"
+    kinect_masks[camera] = bridge.cv2_to_imgmsg(res, "bgr8")    
+    pubs[camera].publish(kinect_masks[camera]) #publish the mask for viewing
+    update_robots(camera)
+    print "done", camera
+    
+
+
+def k1_image_callback(message):
+    mask_image_and_update(message, KINECT1)
         
 def k2_image_callback(message):
-    global color_mask_list
-    global k2_mask
-    global threshold
-    global kinect2pub
-    global blobs_by_color
-    masks = [] # list of our binary masked images by color (from color list)
-    bridge = cv_bridge.CvBridge()	# CvBridge
-    cv_image = bridge.imgmsg_to_cv2(message, "bgr8")
-    hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)  # convert to HSV colorspace
-    for color in color_mask_list:			# for each color, generate a mask
-        masks.append(cv2.inRange(hsv, color[0], color[1]))
-    multi_mask = masks[0]				# create a multiple-color mask for viewing if necessary
-    for x in range(len(masks)):					# populate the multi-color mask
-        blobs_by_color[KINECT2][x] = []
-        multi_mask = cv2.bitwise_or(multi_mask, masks[x])
-        contours,hierarchy = cv2.findContours(masks[x],cv2.RETR_LIST,cv2.CHAIN_APPROX_SIMPLE)
-        for cnt in contours:
-            M = cv2.moments(cnt)
-            area = cv2.contourArea(cnt)
-            if area > MIN_BLOB_SIZE and area < MAX_BLOB_SIZE: 
-                cx = int(M['m10']/M['m00'])
-                cy = int(M['m01']/M['m00'])
-                blobs_by_color[KINECT2][x].append((cx, cy))
-                #print color_string_list[x], " blob at x: ", cx, ' y: ', cy
-    res = cv2.bitwise_and(cv_image,cv_image, mask= multi_mask)
-    k2_mask = bridge.cv2_to_imgmsg(res, "bgr8")    
-    kinect2pub.publish(k2_mask)
-    update_robots(KINECT2)
-    print "done2"
+    mask_image_and_update(message, KINECT2)
 
 def k3_image_callback(message):
-    global color_mask_list
-    global k3_mask
-    global threshold
-    global kinect3pub
-    global blobs_by_color
-    masks = [] # list of our binary masked images by color (from color list)
-    bridge = cv_bridge.CvBridge()	# CvBridge
-    cv_image = bridge.imgmsg_to_cv2(message, "bgr8")
-    hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)  # convert to HSV colorspace
-    for color in color_mask_list:			# for each color, generate a mask
-        masks.append(cv2.inRange(hsv, color[0], color[1]))
-    multi_mask = masks[0]				# create a multiple-color mask for viewing if necessary
-    for x in range(len(masks)):					# populate the multi-color mask
-        blobs_by_color[KINECT3][x] = []
-        multi_mask = cv2.bitwise_or(multi_mask, masks[x])
-        contours,hierarchy = cv2.findContours(masks[x],cv2.RETR_LIST,cv2.CHAIN_APPROX_SIMPLE)
-        for cnt in contours:
-            M = cv2.moments(cnt)
-            area = cv2.contourArea(cnt)
-            if area > MIN_BLOB_SIZE and area < MAX_BLOB_SIZE: 
-                cx = int(M['m10']/M['m00'])
-                cy = int(M['m01']/M['m00'])
-                blobs_by_color[KINECT3][x].append((cx, cy))
-                #print color_string_list[x], " blob at x: ", cx, ' y: ', cy
-    res = cv2.bitwise_and(cv_image,cv_image, mask= multi_mask)
-    k3_mask = bridge.cv2_to_imgmsg(res, "bgr8")    
-    kinect3pub.publish(k3_mask)
-    update_robots(KINECT3)
-    print "done3"
+    mask_image_and_update(message, KINECT3)
+
 
 ################## UTILITY FUNCTIONS ####################################
 
@@ -232,9 +178,7 @@ def update_robots(camera):
 ########  INITIALIZATION ########################################
 
 def initialize():
-    global kinect1pub
-    global kinect2pub
-    global kinect3pub
+    global pubs
     global locpub
     global robots
     robots = []
@@ -243,14 +187,12 @@ def initialize():
 
     rospy.init_node("gort_localize")
     locpub = rospy.Publisher("/gort/location",LocationList) #publish your locations
-    kinect3pub = rospy.Publisher("/gort/mask3",Image) #test your mask
-    kinect2pub = rospy.Publisher("/gort/mask2",Image)
-    kinect1pub = rospy.Publisher("/gort/mask1",Image)
+    pubs.append(rospy.Publisher("/gort/mask1",Image))
+    pubs.append(rospy.Publisher("/gort/mask2",Image))
+    pubs.append(rospy.Publisher("/gort/mask3",Image))
     rospy.Subscriber("/kinect3/rgb/image_color", Image, k3_image_callback, queue_size=1)
-    #rospy.Subscriber("/kinect3/depth_registered/points", PointCloud2, top_cloud_callback)
     rospy.Subscriber("/kinect2/rgb/image_color", Image, k2_image_callback, queue_size=1)
     rospy.Subscriber("/kinect1/rgb/image_color", Image, k1_image_callback, queue_size=1)
-    #rospy.Subscriber("/kinect2/depth_registered/points", PointCloud2, mid_cloud_callback)
     rospy.spin()
 
 if __name__ == "__main__":
